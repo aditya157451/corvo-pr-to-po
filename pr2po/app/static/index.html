@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Corvo PR-to-PO</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1c2430;--mut:#667085;--line:#e3e7ee;--acc:#1f5eff;--ok:#12805c;--warn:#b54708;--bad:#c0392b}
+@media(prefers-color-scheme:dark){:root{--bg:#10141b;--card:#171d27;--ink:#e8ecf3;--mut:#9aa6b8;--line:#2a3342;--acc:#6c9bff;--ok:#41c79a;--warn:#f0a35b;--bad:#ff7b6b}}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+header b{font-size:16px}nav{display:flex;gap:4px;flex-wrap:wrap;flex:1}
+nav button{border:0;background:none;color:var(--mut);padding:7px 11px;border-radius:8px;cursor:pointer;font:inherit}
+nav button.on{background:var(--acc);color:#fff}
+main{max-width:1200px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+h2{margin:0 0 10px;font-size:17px}h3{margin:12px 0 6px;font-size:14px}
+button.p,button.s{border-radius:8px;padding:7px 13px;font:inherit;cursor:pointer;border:1px solid var(--acc)}
+button.p{background:var(--acc);color:#fff}button.s{background:none;color:var(--acc)}button.d{background:none;color:var(--bad);border:1px solid var(--bad);border-radius:8px;padding:7px 13px;cursor:pointer}
+input,select,textarea{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--mut);font-weight:600;font-size:12px}
+tr.click{cursor:pointer}tr.click:hover{background:var(--bg)}
+.tag{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;border:1px solid var(--line);color:var(--mut)}
+.PO{color:var(--ok);border-color:var(--ok)}.SOURCING_REQUEST{color:var(--warn);border-color:var(--warn)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}.mut{color:var(--mut)}
+.chat{height:340px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--bg)}
+.m{max-width:80%;margin:6px 0;padding:8px 11px;border-radius:12px;white-space:pre-wrap}.m.u{margin-left:auto;background:var(--acc);color:#fff}.m.a{background:var(--card);border:1px solid var(--line)}
+.chip{margin:3px 4px 0 0}pre{white-space:pre-wrap;background:var(--bg);padding:8px;border-radius:8px;overflow:auto;max-height:260px;font-size:12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:800px){.grid2{grid-template-columns:1fr}}
+.diff{border-left:3px solid var(--acc);padding:3px 9px;margin:4px 0}.err{color:var(--bad)}.ok{color:var(--ok)}
+</style></head><body>
+<header><b>Corvo PR → PO</b><nav id="nav"></nav>
+<span class="mut">You:</span><input id="uname" value="Asha" size="8"><select id="urole"><option>requester</option><option selected>buyer</option><option>procurement</option></select><span id="badge" class="tag"></span></header>
+<main id="main"></main>
+<script>
+const $=s=>document.querySelector(s),E=(t,a={},...k)=>{const e=document.createElement(t);for(const[x,v]of Object.entries(a))x.startsWith('on')?e[x]=v:e.setAttribute(x,v);k.flat().forEach(c=>e.append(c?.nodeType?c:(c??'')));return e};
+const H=()=>({'X-User':$('#uname').value,'X-Role':$('#urole').value});
+async function api(p,o={}){const r=await fetch('/api'+p,{...o,headers:{...H(),...(o.json?{'Content-Type':'application/json'}:{}),...(o.headers||{})},body:o.json?JSON.stringify(o.json):o.body});
+ const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||j.detail||r.statusText);return j}
+const inr=x=>x===''||x==null?'':'₹'+Number(x).toLocaleString('en-IN',{maximumFractionDigits:0});
+const alertErr=e=>alert(e.message||e);
+const tabs={chat:'New PR (chat)',work:'Buyer workspace',policy:'Policy',sup:'Preferred suppliers',con:'Contracts',audit:'Audit log'};let cur='chat',session=null,runId=null;
+function nav(){const n=$('#nav');n.innerHTML='';for(const[k,v]of Object.entries(tabs))n.append(E('button',{class:k==cur?'on':'',onclick:()=>{cur=k;go()}},v))}
+async function go(){nav();const m=$('#main');m.innerHTML='';try{await views[cur](m)}catch(e){m.append(E('div',{class:'card err'},e.message))}
+ const me=await api('/meta');$('#badge').textContent='Policy v'+me.policy_in_force+(me.ai_enabled?' · AI on':' · AI off')}
+const views={};
+// ---------------- chat
+views.chat=async m=>{const log=E('div',{class:'chat',id:'log'}),chips=E('div'),inp=E('input',{placeholder:'e.g. need 200 nitrile gloves for Chakan by next Friday',style:'flex:1;min-width:220px'});
+ async function send(text,choice){if(text||choice)log.append(E('div',{class:'m u'},choice?('✓ '+choice.split(':')[0]):text));
+  try{const r=await api('/chat',{method:'POST',json:{session_id:session,text,choice}});session=r.session_id;
+   log.append(E('div',{class:'m a'},r.reply.replace(/\*\*/g,'')));log.scrollTop=1e9;chips.innerHTML='';
+   (r.quick_replies||[]).forEach(q=>chips.append(E('button',{class:'s chip',onclick:()=>send('',q.value)},q.label)));
+   if(r.created)chips.append(E('button',{class:'p chip',onclick:()=>{cur='work';runId=1;go()}},'Open in buyer workspace →'))}catch(e){alertErr(e)}}
+ inp.onkeydown=e=>{if(e.key=='Enter'&&inp.value.trim()){const v=inp.value;inp.value='';send(v)}};
+ m.append(E('div',{class:'card'},E('h2',{},'Raise a purchase request'),E('p',{class:'mut'},'Type what you need. I match it to the item master, ask for anything missing, and never invent an item.'),log,chips,E('div',{class:'row'},inp,E('button',{class:'p',onclick:()=>{if(inp.value.trim()){const v=inp.value;inp.value='';send(v)}}},'Send'))));
+ send('','reset:');
+};
+// ---------------- workspace
+views.work=async m=>{const runs=await api('/runs');if(!runId)runId=(runs.find(r=>r.kind=='batch')||runs[0]).id;
+ const f=E('input',{type:'file',accept:'.csv'});
+ m.append(E('div',{class:'card'},E('h2',{},'Process a PR batch'),E('div',{class:'row'},f,E('button',{class:'p',onclick:async()=>{if(!f.files[0])return alert('Choose a CSV first');const fd=new FormData();fd.append('file',f.files[0]);try{const r=await api('/process-batch',{method:'POST',body:fd});runId=r.run_id;go()}catch(e){alertErr(e)}}},'Upload & decide'))));
+ const sel=E('select',{onchange:e=>{runId=+e.target.value;go()}},runs.map(r=>E('option',{value:r.id,...(r.id==runId?{selected:1}:{})},`#${r.id} ${r.name} · ${r.line_count} lines · policy ${r.policy_versions.join(',')||'-'}`)));
+ const run=runs.find(r=>r.id==runId),sc=run.status_counts||{};
+ m.append(E('div',{class:'card'},E('h2',{},'Decisions'),E('div',{class:'row'},sel,E('span',{class:'mut'},`pending ${sc.pending||0} · approved ${sc.approved||0} · overridden ${sc.overridden||0}`)),
+  E('div',{class:'row'},E('button',{class:'p',onclick:async()=>{try{const r=await api(`/runs/${runId}/approve-all`,{method:'POST'});alert(`Approved ${r.approved.length}; ${r.left_for_review.length} left for review (they have flags).`);go()}catch(e){alertErr(e)}}},'Approve all clean decisions'),
+   E('button',{class:'s',onclick:async()=>{try{const r=await api(`/runs/${runId}/reprocess`,{method:'POST'});runId=r.run_id;go()}catch(e){alertErr(e)}}},'Reprocess under current policy'),
+   E('a',{href:`/api/runs/${runId}/decisions.csv`},E('button',{class:'s'},'Export decisions CSV')))));
+ const reqs=await api(`/runs/${runId}/requirements`),flt=E('select',{},['all','pending','needs attention','PO','SOURCING_REQUEST'].map(x=>E('option',{},x))),box=E('div');
+ function draw(){box.innerHTML='';const v=flt.value,t=E('table',{},E('tr',{},['Req','Item','Plant','Lines','Value','Decision','Supplier / suggested','Status'].map(h=>E('th',{},h))));
+  reqs.filter(r=>v=='all'||(v=='pending'&&r.status=='pending')||(v=='needs attention'&&r.needs_attention)||r.decision==v).forEach(r=>t.append(E('tr',{class:'click',onclick:()=>detail(r.group_id)},
+   E('td',{},r.group_id),E('td',{},r.item_code+' '+(r.item_description||'').slice(0,28)),E('td',{},r.plant),E('td',{},r.line_count),E('td',{},inr(r.value)),
+   E('td',{},E('span',{class:'tag '+r.decision},r.route),r.flags.length?' ⚑':''),E('td',{},r.supplier_id||r.suggested.join(', ')),E('td',{},r.status))));box.append(t)}
+ flt.onchange=draw;m.append(E('div',{class:'card'},E('div',{class:'row'},E('b',{},'Filter'),flt),box));draw();
+ const side=E('div',{id:'side'});m.append(side);
+ async function detail(g){const d=await api(`/runs/${runId}/requirements/${g}`),s=$('#side');s.innerHTML='';
+  const ov=E('div',{style:'display:none'}),cm=E('input',{placeholder:'Reason (required)',size:30}),dec=E('select',{},['PO','SOURCING_REQUEST','REJECT'].map(x=>E('option',{},x))),sup=E('input',{placeholder:'supplier id e.g. S014',size:10}),pr=E('input',{placeholder:'unit price',size:8}),sg=E('input',{placeholder:'suggested ids a;b;c',size:16});
+  s.append(E('div',{class:'card'},E('h2',{},`${d.group_id} · ${d.item_code} ${d.item_description||''}`),
+   E('p',{},E('span',{class:'tag '+d.decision},d.route),` value ${inr(d.value)} · policy v${d.policy_version} · rule ${d.rule_id} · status `,E('b',{},d.status)),
+   E('p',{},E('b',{},'Why: '),d.reason),d.flags.length?E('p',{class:'err'},'⚑ '+d.flags.join(' | ')):'',
+   d.supplier_id?E('p',{},`Supplier ${d.supplier_id} at ${inr(d.unit_price)} · relied on ${d.relied_on}${d.po_id?' · '+d.po_id:''}`):(d.suggested.length?E('p',{},'Suggested: '+d.suggested.join(', ')):''),
+   E('h3',{},'PR lines'),E('table',{},E('tr',{},['PR','Created','Qty','Need by','Urgency','Description'].map(h=>E('th',{},h))),d.lines.map(l=>E('tr',{},E('td',{},l.pr_no+'/'+l.pr_line),E('td',{},l.created_at),E('td',{},l.quantity),E('td',{},l.need_by),E('td',{},l.urgency),E('td',{},l.description)))),
+   d.status=='pending'?E('div',{class:'row'},E('button',{class:'p',onclick:async()=>{try{await api(`/runs/${runId}/requirements/${g}/approve`,{method:'POST'});go()}catch(e){alertErr(e)}}},'Approve → '+(d.decision=='PO'?'create PO':'raise '+d.route)),E('button',{class:'d',onclick:()=>ov.style.display='block'},'Override…')):'',
+   ov,E('details',{},E('summary',{},'Policy trace (contracts, preferred list, rule context)'),E('pre',{},JSON.stringify(d.explain,null,1))),
+   d.override?E('p',{},E('b',{},'Override: '),d.override.comment+' — '+d.override.by):''));
+  ov.append(E('div',{class:'row'},dec,sup,pr,sg,cm,E('button',{class:'d',onclick:async()=>{try{await api(`/runs/${runId}/requirements/${g}/override`,{method:'POST',json:{decision:dec.value,supplier_id:sup.value,unit_price:pr.value,suggested:sg.value.split(';').map(x=>x.trim()).filter(Boolean),comment:cm.value}});go()}catch(e){alertErr(e)}}},'Save override')));
+  s.scrollIntoView({behavior:'smooth'})}
+};
+// ---------------- policy
+views.policy=async m=>{const ps=await api('/policies'),file=E('input',{type:'file'}),txt=E('textarea',{rows:3,placeholder:'…or describe a change: e.g. "From 1 Dec 2026 the spot PO limit is ₹3,00,000; for plant CHK1 emergency POs are allowed up to ₹7,50,000."',style:'width:100%'}),eff=E('input',{type:'date'});
+ m.append(E('div',{class:'card'},E('h2',{},'Upload an amendment or describe a change'),file,txt,E('div',{class:'row'},E('span',{class:'mut'},'Effective date (optional override):'),eff,E('button',{class:'p',onclick:async()=>{const fd=new FormData();if(file.files[0])fd.append('file',file.files[0]);fd.append('text',txt.value);if(eff.value)fd.append('effective_date',eff.value);try{await api('/policies/propose',{method:'POST',body:fd});go()}catch(e){alertErr(e)}}},'Read & show changes'))));
+ ps.forEach(p=>{const c=E('div',{class:'card'},E('h2',{},`Version ${p.version} `,E('span',{class:'tag'},p.status+(p.in_force_today?' · in force today':p.future?' · scheduled':'')),` effective ${p.effective_date}`),E('p',{class:'mut'},`${p.source_name||''} · ${p.created_by||''} ${p.created_at||''}${p.decided_by?' · decided by '+p.decided_by:''}`),p.summary?E('p',{},p.summary):'');
+  (p.diff||[]).forEach(d=>c.append(E('div',{class:'diff'},d.text)));(p.warnings||[]).forEach(w=>c.append(E('div',{class:w.startsWith('Validation')?'err':'mut'},'⚠ '+w)));
+  if(p.status=='pending')c.append(E('div',{class:'row'},E('button',{class:'p',onclick:async()=>{try{await api(`/policies/${p.id}/approve`,{method:'POST',json:{}});go()}catch(e){alertErr(e)}}},`Approve — active from ${p.effective_date}`),E('button',{class:'d',onclick:async()=>{await api(`/policies/${p.id}/reject`,{method:'POST',json:{}});go()}},'Reject')));
+  c.append(E('details',{},E('summary',{},'Policy JSON (rules, limits, windows)'),E('pre',{},JSON.stringify(p.doc,null,1))));m.append(c)})};
+// ---------------- suppliers
+views.sup=async m=>{const items=await api('/items'),sel=E('select',{},items.map(i=>E('option',{value:i.item_code},i.item_code+' '+i.description))),d=E('input',{type:'date',value:new Date().toISOString().slice(0,10)}),out=E('div');
+ async function load(){const r=await api(`/items/${sel.value}/preferred?as_of=${d.value}`);out.innerHTML='';out.append(E('p',{class:'mut'},'Score = '+Object.entries(r.weights||{}).map(([k,v])=>`${v}×${k}`).join(' + ')+` (policy v${r.policy_version})`),
+  E('table',{},E('tr',{},['Rank','Supplier','POs','Recency','Contract','On-time','Quality','Score','Ref. price'].map(h=>E('th',{},h))),r.list.map(p=>E('tr',{},E('td',{},p.rank),E('td',{},p.supplier_id+' '+p.name),E('td',{},p.po_count),E('td',{},p.recency),E('td',{},p.contract_ids.length?'yes':'no'),E('td',{},p.on_time_pct+'%'),E('td',{},p.quality_rating),E('td',{},p.score),E('td',{},inr(p.reference_price))))),
+  r.excluded.map(x=>E('p',{class:'mut'},`Excluded ${x.supplier_id} (${x.status}): ${x.reason}`)))}
+ sel.onchange=load;d.onchange=load;m.append(E('div',{class:'card'},E('h2',{},'Preferred supplier list'),E('div',{class:'row'},sel,d,E('a',{id:'dl',href:'#',onclick:e=>{e.target.href=`/api/preferred-suppliers.csv?as_of=${d.value}&top=3`}},'Export top-3 CSV')),out));load()};
+// ---------------- contracts
+views.con=async m=>{const cs=await api('/contracts'),pdf=E('input',{type:'file',accept:'.pdf'}),f={};
+ const form=E('div',{class:'row'},...['contract_id','supplier_id','start_date','end_date','value_cap'].map(k=>(f[k]=E('input',{placeholder:k,size:12}))),(f.lines=E('textarea',{placeholder:'item_code,rate per line',rows:3,cols:26})),E('button',{class:'p',onclick:async()=>{const lines=f.lines.value.split('\n').filter(x=>x.trim()).map(x=>{const[a,b]=x.split(',');return{item_code:a.trim(),rate:+b}});const fd=new FormData();fd.append('data',JSON.stringify({...Object.fromEntries(['contract_id','supplier_id','start_date','end_date','value_cap'].map(k=>[k,f[k].value])),lines}));if(pdf.files[0])fd.append('pdf',pdf.files[0]);try{await api('/contracts',{method:'POST',body:fd});go()}catch(e){alertErr(e)}}},'Save contract'));
+ pdf.onchange=async()=>{const fd=new FormData();fd.append('pdf',pdf.files[0]);try{const r=await api('/contracts/extract',{method:'POST',body:fd});['contract_id','supplier_id','start_date','end_date','value_cap'].forEach(k=>f[k].value=r[k]??'');f.lines.value=r.lines.map(l=>l.item_code+','+l.rate).join('\n');if(r.warnings.length)alert(r.warnings.join('\n'))}catch(e){alertErr(e)}};
+ m.append(E('div',{class:'card'},E('h2',{},'Add a contract that exists only as a PDF'),E('p',{class:'mut'},'Choose the signed PDF: details are extracted, check them, then save.'),pdf,form));
+ m.append(E('div',{class:'card'},E('h2',{},'Contract register'),E('table',{},E('tr',{},['Contract','Supplier','Valid','Ceiling','Consumed','Source','Items'].map(h=>E('th',{},h))),cs.map(c=>E('tr',{},E('td',{},c.has_pdf?E('a',{href:`/api/contracts/${c.contract_id}/pdf`,target:'_blank'},c.contract_id):c.contract_id),E('td',{},`${c.supplier_id} ${c.supplier_name||''} (${c.supplier_status})`),E('td',{},c.start_date+' → '+c.end_date),E('td',{},inr(c.value_cap)),E('td',{},inr(c.consumed_value)),E('td',{},c.source),E('td',{},c.lines.map(l=>l.item_code).join(', ')))))))};
+views.audit=async m=>{const a=await api('/audit');m.append(E('div',{class:'card'},E('h2',{},'Audit log'),E('table',{},E('tr',{},['When','Who','Action','Entity','Detail'].map(h=>E('th',{},h))),a.map(x=>E('tr',{},E('td',{},x.ts),E('td',{},x.user+' ('+x.role+')'),E('td',{},x.action),E('td',{},x.entity+' '+x.entity_id),E('td',{},E('code',{},JSON.stringify(x.detail).slice(0,160))))))))};
+go();
+</script></body></html>

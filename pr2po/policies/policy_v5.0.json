@@ -1,0 +1,85 @@
+{
+  "version": "5.0",
+  "title": "Corvo Engineering Procurement Policy v5.0",
+  "effective_date": "2026-04-01",
+  "source": "Corvo_Procurement_Policy.pdf (CORVO-PROC-POL-04)",
+  "params": {
+    "club_created_within_days": 14,
+    "club_need_by_within_days": 7,
+    "po_consolidation_window_hours": 24,
+    "recent_purchase_days": 365,
+    "valuation_po_lookback_days": 365,
+    "preferred_list_lookback_days": 548
+  },
+  "limits": {
+    "spot_po_limit": 200000,
+    "emergency_po_limit": 500000,
+    "rfq_limit": 1000000
+  },
+  "ranking": {
+    "weights": { "frequency": 0.30, "recency": 0.25, "contract": 0.20, "on_time": 0.15, "quality": 0.10 },
+    "frequency_cap": 6,
+    "recency_tiers": [
+      { "within_days": 90, "score": 1.0 },
+      { "within_days": 365, "score": 0.5 },
+      { "within_days": 100000, "score": 0.0 }
+    ],
+    "topup": { "on_time_weight": 0.5, "quality_weight": 0.5 }
+  },
+  "rules": [
+    {
+      "id": "1.2",
+      "title": "New item (not in item master) always goes to sourcing",
+      "when": { "all": [ { "field": "is_new_item", "op": "eq", "value": true } ] },
+      "then": { "decision": "SOURCING_REQUEST", "route": "NEW_ITEM_SOURCING", "suggest_suppliers": 0 }
+    },
+    {
+      "id": "5.1",
+      "title": "Capex items always go to sourcing (needs capex approval)",
+      "when": { "all": [ { "field": "item_type", "op": "eq", "value": "Capex" } ] },
+      "then": { "decision": "SOURCING_REQUEST", "route": "CAPEX_SOURCING", "suggest_suppliers": 5, "requires_approval": "capex" }
+    },
+    {
+      "id": "5.2",
+      "title": "A rate contract can be used (applicable and ceiling left)",
+      "when": { "all": [ { "field": "contract_usable", "op": "eq", "value": true } ] },
+      "then": { "decision": "PO", "route": "CONTRACT_PO", "supplier": "contract", "price": "contract_rate" }
+    },
+    {
+      "id": "5.3",
+      "title": "Emergency, within the emergency limit, item bought from an Active supplier recently",
+      "when": { "all": [
+        { "field": "is_emergency", "op": "eq", "value": true },
+        { "field": "value", "op": "lte", "ref": "limits.emergency_po_limit" },
+        { "field": "days_since_active_purchase", "op": "lte", "ref": "params.recent_purchase_days" }
+      ] },
+      "then": { "decision": "PO", "route": "EMERGENCY_PO", "supplier": "preferred", "supplier_rank": 1, "price": "reference_price" }
+    },
+    {
+      "id": "5.4",
+      "title": "Value below spot limit and item bought from an Active supplier recently",
+      "when": { "all": [
+        { "field": "value", "op": "lt", "ref": "limits.spot_po_limit" },
+        { "field": "days_since_active_purchase", "op": "lte", "ref": "params.recent_purchase_days" }
+      ] },
+      "then": { "decision": "PO", "route": "SPOT_PO", "supplier": "preferred", "supplier_rank": 1, "price": "reference_price" }
+    },
+    {
+      "id": "5.5",
+      "title": "Value below the RFQ limit (includes small items never bought recently)",
+      "when": { "all": [ { "field": "value", "op": "lt", "ref": "limits.rfq_limit" } ] },
+      "then": { "decision": "SOURCING_REQUEST", "route": "RFQ", "suggest_suppliers": 3 }
+    },
+    {
+      "id": "5.6",
+      "title": "Value at or above the RFQ limit goes to a formal RFP",
+      "when": { "all": [ { "field": "value", "op": "gte", "ref": "limits.rfq_limit" } ] },
+      "then": { "decision": "SOURCING_REQUEST", "route": "RFP", "suggest_suppliers": 5 }
+    }
+  ],
+  "fallback": {
+    "id": "fallback",
+    "title": "No rule matched: send to quotes for a buyer to review",
+    "then": { "decision": "SOURCING_REQUEST", "route": "RFQ", "suggest_suppliers": 3 }
+  }
+}
